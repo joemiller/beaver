@@ -9,6 +9,7 @@ from beaver.queue import run_queue
 from beaver.ssh_tunnel import create_ssh_tunnel
 from beaver.utils import setup_custom_logger, REOPEN_FILES
 from beaver.worker.worker import Worker
+from beaver.worker.journal import Journal
 
 
 def run(args):
@@ -63,8 +64,8 @@ def run(args):
                 logger.debug('Detected non-linux platform. Files will be reopened for tailing')
 
             logger.info('Starting worker...')
-            worker = Worker(beaver_config, queue_consumer_function=create_queue_consumer, callback=queue.put, logger=logger)
-
+            # worker = Worker(beaver_config, queue_consumer_function=create_queue_consumer, callback=queue.put, logger=logger)
+            worker = Journal(beaver_config, queue_consumer_function=create_queue_consumer, callback=queue.put, logger=logger)
             logger.info('Working...')
             worker.loop()
 
