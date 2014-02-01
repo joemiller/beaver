@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
 import logging
 import os
+import re
 import socket
 import warnings
 
 from conf_d import Configuration
 from beaver.utils import eglob
-
+from beaver.glob_safe_config_parser import GlobSafeConfigParser
 
 class BeaverConfig():
 
@@ -16,6 +17,7 @@ class BeaverConfig():
 
         self._section_defaults = {
             'add_field': '',
+            'add_field_env': '',
             'debug': '0',
             'discover_interval': '15',
             'encoding': 'utf_8',
@@ -35,6 +37,10 @@ class BeaverConfig():
             'delimiter': '\n',
             'size_limit': '',
 
+            # multiline events support. Default is disabled
+            'multiline_regex_after': '',
+            'multiline_regex_before': '',
+
             'message_format': '',
             'sincedb_write_interval': '15',
             'stat_interval': '1',
@@ -52,6 +58,10 @@ class BeaverConfig():
             'mqtt_keepalive': '60',
             'rabbitmq_host': os.environ.get('RABBITMQ_HOST', 'localhost'),
             'rabbitmq_port': os.environ.get('RABBITMQ_PORT', '5672'),
+            'rabbitmq_ssl': '0',
+            'rabbitmq_ssl_key': '',
+            'rabbitmq_ssl_cert': '',
+            'rabbitmq_ssl_cacert': '',
             'rabbitmq_vhost': os.environ.get('RABBITMQ_VHOST', '/'),
             'rabbitmq_username': os.environ.get('RABBITMQ_USERNAME', 'guest'),
             'rabbitmq_password': os.environ.get('RABBITMQ_PASSWORD', 'guest'),
@@ -71,6 +81,10 @@ class BeaverConfig():
             'sqs_aws_queue': '',
             'tcp_host': '127.0.0.1',
             'tcp_port': '9999',
+            'tcp_ssl_enabled': '0',
+            'tcp_ssl_verify': '0',
+            'tcp_ssl_cacert': '',
+            'tcp_ssl_cert': '',
             'udp_host': os.environ.get('UDP_HOST', '127.0.0.1'),
             'udp_port': os.environ.get('UDP_PORT', '9999'),
             'zeromq_address': os.environ.get('ZEROMQ_ADDRESS', 'tcp://localhost:2120'),
@@ -91,11 +105,17 @@ class BeaverConfig():
             # time in seconds from last command sent before a queue kills itself
             'queue_timeout': '60',
 
+            # kill and respawn worker process after given number of seconds
+            'refresh_worker_process': '',
+
             # time in seconds to wait on queue.get() block before raising Queue.Empty exception
             'wait_timeout': '5',
 
             # path to sincedb sqlite db
             'sincedb_path': '',
+
+            # 0 for logstash version < 1.2, 1 for logstash >= 1.2
+            'logstash_version': '',
 
             # ssh tunnel support
             'ssh_key_file': '',
@@ -103,6 +123,7 @@ class BeaverConfig():
             'ssh_tunnel_port': '',
             'ssh_remote_host': '',
             'ssh_remote_port': '',
+            'ssh_options': '',
             'subprocess_poll_sleep': '1',
 
             # the following can be passed via argparse
@@ -127,6 +148,7 @@ class BeaverConfig():
         }
 
         self._configfile = args.config
+        self._config_parser = GlobSafeConfigParser
         self._globbed = []
         self._parse(args)
         for key in self._beaver_config:
@@ -244,7 +266,8 @@ class BeaverConfig():
                 if config[key] == '':
                     config[key] = None
 
-            require_bool = ['debug', 'daemonize', 'fqdn', 'rabbitmq_exchange_durable', 'rabbitmq_queue_durable', 'rabbitmq_ha_queue']
+            require_bool = ['debug', 'daemonize', 'fqdn', 'rabbitmq_exchange_durable', 'rabbitmq_queue_durable',
+                            'rabbitmq_ha_queue', 'rabbitmq_ssl', 'tcp_ssl_enabled', 'tcp_ssl_verify']
 
             for key in require_bool:
                 config[key] = bool(int(config[key]))
@@ -256,10 +279,12 @@ class BeaverConfig():
                 'rabbitmq_port',
                 'respawn_delay',
                 'subprocess_poll_sleep',
+                'refresh_worker_process',
                 'tcp_port',
                 'udp_port',
                 'wait_timeout',
                 'zeromq_hwm',
+                'logstash_version',
             ]
             for key in require_int:
                 if config[key] is not None:
@@ -296,6 +321,15 @@ class BeaverConfig():
 
             if config['zeromq_address'] and type(config['zeromq_address']) == str:
                 config['zeromq_address'] = [x.strip() for x in config.get('zeromq_address').split(',')]
+
+            if config.get('ssh_options') is not None:
+                csv = config.get('ssh_options')
+                config['ssh_options'] = []
+                if csv == str:
+                    for opt in csv.split(','):
+                        config['ssh_options'].append('-o %s' % opt.strip())
+            else:
+                config['ssh_options'] = []
 
             config['globs'] = {}
 
@@ -337,6 +371,29 @@ class BeaverConfig():
             if 'add_field' in config:
                 del config['add_field']
 
+            envFields = config.get('add_field_env', '')
+            if type(envFields) != dict:
+                try:
+                    if type(envFields) == str:
+                        envFields = envFields.replace(" ","")
+                        envFields = filter(None, envFields.split(','))
+                    if len(envFields) == 0:
+                        config['envFields'] = {}
+                    elif (len(envFields) % 2) == 1:
+                        if raise_exceptions:
+                            raise Exception('Wrong number of values for add_field_env')
+                    else:
+                        envFieldkeys = envFields[0::2]
+                        envFieldvalues = []
+                        for x in envFields[1::2]:
+                            envFieldvalues.append(os.environ.get(x))
+                        config['fields'].update(dict(zip(envFieldkeys, envFieldvalues)))
+                except TypeError:
+                    config['envFields'] = {}
+
+            if 'add_field_env' in config:
+                del config['add_field_env']
+
             try:
                 tags = config.get('tags', '')
                 if type(tags) == str:
@@ -360,6 +417,11 @@ class BeaverConfig():
 
             config['delimiter'] = config['delimiter'].decode('string-escape')
 
+            if config['multiline_regex_after']:
+                config['multiline_regex_after'] = re.compile(config['multiline_regex_after'])
+            if config['multiline_regex_before']:
+                config['multiline_regex_before'] = re.compile(config['multiline_regex_before'])
+
             require_int = ['sincedb_write_interval', 'stat_interval', 'tail_lines']
             for k in require_int:
                 config[k] = int(config[k])
@@ -373,7 +435,8 @@ class BeaverConfig():
             section_defaults=self._section_defaults,
             main_parser=_main_parser,
             section_parser=_section_parser,
-            path_from_main='confd_path'
+            path_from_main='confd_path',
+            config_parser=self._config_parser
         )
 
         config = conf.raw()

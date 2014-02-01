@@ -15,9 +15,7 @@ class RedisTransport(BaseTransport):
 
         redis_url = beaver_config.get('redis_url')
         redis_password = beaver_config.get('redis_password')
-        _url = urlparse.urlparse(redis_url, scheme='redis')
-        _, _, _db = _url.path.rpartition('/')
-        self._redis = redis.StrictRedis(host=_url.hostname, port=_url.port, password=redis_password, db=int(_db), socket_timeout=10)
+        self._redis = redis.StrictRedis.from_url(redis_url, socket_timeout=10)
         self._redis_namespace = beaver_config.get('redis_namespace')
         self._is_valid = False
 
@@ -67,6 +65,6 @@ class RedisTransport(BaseTransport):
 
         try:
             self._pipeline.execute()
-        except redis.exceptions.ConnectionError, e:
+        except redis.exceptions.RedisError, e:
             traceback.print_exc()
             raise TransportException(str(e))

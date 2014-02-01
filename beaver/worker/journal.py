@@ -17,9 +17,9 @@ def serializable_journal_entry(entry):
     """takes a journal entry returned by journal.Reader() and returns a dict that is
     serializable by json.dumps()
     """
-    # Check for objects in the dictionary that may not be serializable by
-    # default. Specifically, convert datetime and date objects to ISO 8601
-    # format, and convert UUID objects to hexadecimal strings.
+    # Check for objects in the entry dictionary that may not be serializable.
+    # Specifically, convert datetime and date objects to ISO 8601 format, and
+    # convert UUID objects to hexadecimal strings.
     #
     # A special case is applied for '__MONOTONIC_TIMESTAMP', which contains a tuple of
     #    (datetime.timedelta(0, 1, 346747), UUID('d6d125ca-d752-4e81-9f2f-f92f60336bb0'))
@@ -95,30 +95,34 @@ class Journal(object):
     def _callback_wrapper(self, entry):
         entry = serializable_journal_entry(entry)
 
-        # filename is required by beaver, hardcode to special case 'systemd-journal'.
-        filename = 'systemd-journal'
+        # special "filename" to identify journald settings in the beaver config
+        filename = '/systemd-journald'
 
         # extract required keys
         message = entry.pop('MESSAGE')
         ts = entry.pop('__REALTIME_TIMESTAMP')
 
-        # remove certain fields that we don't want to send to logstash
+        # remove fields that we don't want to send to logstash
         entry.pop('__CURSOR')
 
         # all remaining keys are added as additional @fields
         fields = entry
 
-        self._callback(('callback', {
-            # 'fields': self._beaver_config.get_field('fields', filename),
+        args = {
+            'fields': self._beaver_config.get_field('fields', filename),
             'filename': filename,
-            # 'format': self._beaver_config.get_field('format', filename),
-            # 'ignore_empty': self._beaver_config.get_field('ignore_empty', filename),
+            #'format': self._beaver_config.get_field('format', filename),  # @TODO: shouldn't be necessary
+            'ignore_empty': self._beaver_config.get_field('ignore_empty', filename),
             'lines': [message],  # must be list
             'fields': fields,
             'timestamp': ts,
-            # 'tags': self._beaver_config.get_field('tags', filename),
-            # 'type': self._beaver_config.get_field('type', filename),
-        }))
+            'tags': self._beaver_config.get_field('tags', filename),
+            #'type': self._beaver_config.get_field('type', filename),  # @TODO: not sure what to do. doesn't make sense for journald
+        }
+        self._logger.debug('callback args: %s' % args)
+        self._callback(('callback', args))
+        #self._callback(('callback', {
+        #}))
 
 
     def loop(self, async=False):
@@ -138,7 +142,7 @@ class Journal(object):
                 self._read_journal_entries()
                 # @TODO: save cursor
             elif r == journal.INVALIDATE:
-                # @TODO: not sure what to do with these yet, and the library always seems to
+                # @TODO: not sure what to do with these. The library always seems to
                 # throw one as the first event after opening the journal.
                 self._logger.debug('Journal.loop(): got journal.INVALIDATE')
 
