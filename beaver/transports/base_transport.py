@@ -113,7 +113,6 @@ class BaseTransport(object):
             fields = kwargs.get('fields')
             for key in fields:
                 data[key] = fields.get(key)
-
         return self._formatters[formatter](data)
 
     def get_timestamp(self, **kwargs):

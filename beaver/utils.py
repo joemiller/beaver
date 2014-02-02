@@ -48,6 +48,7 @@ def parse_args():
     parser.add_argument('-e', '--experimental', help='use experimental version of beaver', dest='experimental', default=False, action='store_true')
     parser.add_argument('-v', '--version', help='output version and quit', dest='version', default=False, action='store_true')
     parser.add_argument('--fqdn', help='use the machine\'s FQDN for source_host', dest='fqdn', default=False, action='store_true')
+    parser.add_argument('-j', '--journal', help='read logs from the journal, disables --files and --path', dest='use_journal', default=False, action='store_true')
 
     return parser.parse_args()
 

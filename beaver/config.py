@@ -135,9 +135,13 @@ class BeaverConfig():
             'output': '',
             'path': os.environ.get('BEAVER_PATH', '/var/log'),
             'transport': os.environ.get('BEAVER_TRANSPORT', 'stdout'),  # this needs to be passed to the import class somehow
+            'use_journal': False,  # read logs from the journal (systemd-journald) instead of files.
 
             # Path to individual file configs. These override any sections in the main beaver.ini file
             'confd_path': '/etc/beaver/conf.d',
+
+            # interval to save journal cursor to the cursor_save_file.
+            'cursor_save_interval' : '5',
 
             # the following are parsed before the config file is parsed
             # but may be useful at runtime
@@ -167,7 +171,10 @@ class BeaverConfig():
         self._beaver_config[key] = value
 
     def get_field(self, field, filename):
-        return self._files.get(os.path.realpath(filename), self._section_defaults)[field]
+        if filename == 'journal':
+            return self._journal_config.get(field)
+        else:
+            return self._files.get(os.path.realpath(filename), self._section_defaults)[field]
 
     def addglob(self, globname, globbed):
         if globname not in self._globbed:
@@ -260,6 +267,9 @@ class BeaverConfig():
             if args.mode:
                 config['zeromq_bind'] = args.mode
 
+            if args.use_journal:
+                config['use_journal'] = args.use_journal
+
             # HACK: Python 2.6 ConfigParser does not properly
             #       handle non-string values
             for key in config:
@@ -285,6 +295,7 @@ class BeaverConfig():
                 'wait_timeout',
                 'zeromq_hwm',
                 'logstash_version',
+                'cursor_save_interval'
             ]
             for key in require_int:
                 if config[key] is not None:
@@ -318,6 +329,9 @@ class BeaverConfig():
 
             if config.get('sincedb_path'):
                 config['sincedb_path'] = os.path.realpath(config.get('sincedb_path'))
+
+            if config.get('cursor_save_file'):
+                config['cursor_save_file'] = os.path.realpath(config.get('cursor_save_file'))
 
             if config['zeromq_address'] and type(config['zeromq_address']) == str:
                 config['zeromq_address'] = [x.strip() for x in config.get('zeromq_address').split(',')]
@@ -442,6 +456,9 @@ class BeaverConfig():
         config = conf.raw()
         self._beaver_config = config['beaver']
         self._file_config = config['sections']
+
+        if 'journal' in config['sections']:
+            self._journal_config = config['sections'].pop('journal')
 
         self._main_parser = _main_parser(self._main_defaults)
         self._section_defaults = _section_parser(self._section_defaults, raise_exceptions=False)

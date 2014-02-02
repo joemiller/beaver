@@ -10,7 +10,6 @@ from beaver.run_queue import run_queue
 from beaver.ssh_tunnel import create_ssh_tunnel
 from beaver.utils import setup_custom_logger, REOPEN_FILES
 from beaver.worker.worker import Worker
-from beaver.worker.journal import Journal
 
 def run(args=None):
     logger = setup_custom_logger('beaver', args)
@@ -23,6 +22,10 @@ def run(args=None):
 
     worker_proc = None
     ssh_tunnel = create_ssh_tunnel(beaver_config, logger=logger)
+
+    # defensively load journal module here. it will only be available on boxes using systemd
+    if beaver_config.get('use_journal'):
+        from beaver.worker.journal import Journal
 
     def cleanup(signalnum, frame):
         if signalnum is not None:
@@ -65,8 +68,10 @@ def run(args=None):
         return proc
 
     def create_queue_producer():
-       # worker = Worker(beaver_config, queue_consumer_function=create_queue_consumer, callback=queue.put, logger=logger)
-        worker = Journal(beaver_config, queue_consumer_function=create_queue_consumer, callback=queue.put, logger=logger)
+        if beaver_config.get('use_journal'):
+            worker = Journal(beaver_config, queue_consumer_function=create_queue_consumer, callback=queue.put, logger=logger)
+        else:
+            worker = Worker(beaver_config, queue_consumer_function=create_queue_consumer, callback=queue.put, logger=logger)
         worker.loop()
 
     while 1:
